@@ -1,0 +1,9 @@
+{
+ "meta": {
+  "timezone": "Asia/Tehran",
+  "times": ["03:30", "11:30", "19:30"],
+  "assets": ["BTC", "ETH", "TUT", "RLC", "GOLD"],
+  "updated": null
+ },
+ "rows": []
+}

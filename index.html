@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>داشبورد قیمت ارز دیجیتال و طلا</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1a1d23;--muted:#6b7280;--border:#e5e7eb;--accent:#2563eb;--up:#16a34a;--down:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b22;--text:#e6e8ee;--muted:#9aa3b2;--border:#2a2f3a;--accent:#60a5fa;--up:#4ade80;--down:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.6}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:1.3rem;margin:0 0 2px}
+h2{font-size:1rem;margin:0 0 10px}
+.sub{color:var(--muted);font-size:.85rem;margin-bottom:14px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+.controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.group{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.group>label{color:var(--muted);font-size:.85rem}
+button,select{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 11px;cursor:pointer}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip.on{color:#fff}
+.chart-box{position:relative;height:340px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+.card .name{font-weight:600;display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.card .price{font-size:1.25rem;font-weight:700;direction:ltr;text-align:right}
+.card .chg{font-weight:600;direction:ltr;text-align:right}
+.card .hl{color:var(--muted);font-size:.78rem;direction:ltr;text-align:right}
+.up{color:var(--up)}.down{color:var(--down)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+th,td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap}
+th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--card)}
+td.num{direction:ltr}
+.tbl-wrap{max-height:420px;overflow:auto}
+.corr td,.corr th{padding:8px 12px}
+#msg{color:var(--down);padding:10px}
+.foot{color:var(--muted);font-size:.78rem;text-align:center;margin:18px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>داشبورد قیمت ارز دیجیتال و طلا</h1>
+  <div class="sub" id="updated">در حال بارگذاری…</div>
+  <div id="msg"></div>
+
+  <div class="panel controls" id="controls"></div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2 id="chartTitle">نمودار</h2>
+    <div class="chart-box"><canvas id="chart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>همبستگی بین دارایی‌ها</h2>
+    <div class="sub" style="margin-bottom:8px">نزدیک به +۱ یعنی با هم بالا و پایین می‌روند، نزدیک به −۱ یعنی خلاف هم. بر اساس تغییرات بین نقاط متوالی در بازه‌ی انتخابی.</div>
+    <div class="scroll" id="corr"></div>
+  </div>
+
+  <div class="panel">
+    <div class="group" style="justify-content:space-between;margin-bottom:10px">
+      <h2 style="margin:0">جدول داده‌ها</h2>
+      <button id="csvBtn">دانلود CSV</button>
+    </div>
+    <div class="tbl-wrap"><table id="table"></table></div>
+  </div>
+
+  <div class="foot">منبع: بایننس (ارزها) و یاهو فایننس (طلا؛ ممکن است اسپات یا قرارداد آتی باشد). قیمت‌ها به دلار. خانه‌ی خالی (—) یعنی داده‌ای نبوده، مثلاً بازار طلا بسته بوده. این صفحه توصیه‌ی مالی نیست.</div>
+</div>
+
+<script>
+const COLORS = {BTC:'#f7931a', ETH:'#627eea', TUT:'#10b981', RLC:'#a855f7', GOLD:'#eab308'};
+const FALLBACK = ['#06b6d4','#ec4899','#84cc16','#f43f5e'];
+const $ = s => document.querySelector(s);
+let DATA, ASSETS = [], chart;
+const state = {sel:new Set(), days:30, slot:'all', mode:'pct', single:null, shamsi:false};
+
+const faFmt = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {year:'numeric', month:'2-digit', day:'2-digit', timeZone:'UTC'});
+function label(t){
+  const [d, h] = t.split(' ');
+  let ds = d;
+  if(state.shamsi){ const [y,m,dd] = d.split('-').map(Number); ds = faFmt.format(new Date(Date.UTC(y, m-1, dd, 12))); }
+  return ds + ' ' + h;
+}
+const colorOf = a => COLORS[a] || FALLBACK[ASSETS.indexOf(a) % FALLBACK.length];
+const fmtPrice = v => v == null ? '—' : (v >= 100 ? v.toLocaleString('en-US', {maximumFractionDigits:2}) : v.toFixed(4));
+const avg = xs => xs.reduce((a,b) => a+b, 0) / xs.length;
+
+function filtered(){
+  const rows = DATA.rows;
+  if(!rows.length) return [];
+  let out = rows;
+  if(state.days){
+    const last = new Date(rows[rows.length-1].t.slice(0,10) + 'T00:00:00Z');
+    const cut = new Date(last.getTime() - (state.days-1)*864e5).toISOString().slice(0,10);
+    out = out.filter(r => r.t.slice(0,10) >= cut);
+  }
+  if(state.slot !== 'all') out = out.filter(r => r.t.endsWith(state.slot));
+  return out;
+}
+
+function buildControls(){
+  const c = $('#controls');
+  c.innerHTML = `
+    <div class="group"><label>دارایی‌ها:</label><span id="chips" class="group"></span></div>
+    <div class="group"><label>بازه:</label>
+      <select id="days">
+        <option value="7">۷ روز</option><option value="14">۱۴ روز</option>
+        <option value="30" selected>۳۰ روز</option><option value="90">۹۰ روز</option>
+        <option value="0">همه</option>
+      </select></div>
+    <div class="group"><label>ساعت:</label>
+      <select id="slot"><option value="all">همه‌ی ساعت‌ها</option>
+        ${DATA.meta.times.map(t => `<option value="${t}">${t}</option>`).join('')}
+      </select></div>
+    <div class="group"><label>نمایش:</label>
+      <button id="mPct" class="on">مقایسه‌ی درصدی</button>
+      <button id="mPrice">قیمت واقعی</button>
+      <select id="single" style="display:none">${ASSETS.map(a => `<option>${a}</option>`).join('')}</select></div>
+    <div class="group"><label><input type="checkbox" id="shamsi"> تاریخ شمسی</label></div>`;
+
+  $('#chips').innerHTML = ASSETS.map(a => `<button class="chip on" data-a="${a}" style="background:${colorOf(a)};border-color:${colorOf(a)}">${a}</button>`).join('');
+  $('#chips').onclick = e => {
+    const b = e.target.closest('.chip'); if(!b) return;
+    const a = b.dataset.a;
+    if(state.sel.has(a)){ if(state.sel.size === 1) return; state.sel.delete(a); b.classList.remove('on'); b.style.background = ''; b.style.color = ''; }
+    else { state.sel.add(a); b.classList.add('on'); b.style.background = colorOf(a); b.style.color = '#fff'; }
+    render();
+  };
+  $('#days').onchange = e => { state.days = +e.target.value; render(); };
+  $('#slot').onchange = e => { state.slot = e.target.value; render(); };
+  $('#single').onchange = e => { state.single = e.target.value; render(); };
+  $('#shamsi').onchange = e => { state.shamsi = e.target.checked; render(); };
+  $('#mPct').onclick = () => setMode('pct');
+  $('#mPrice').onclick = () => setMode('price');
+  $('#csvBtn').onclick = downloadCSV;
+}
+function setMode(m){
+  state.mode = m;
+  $('#mPct').classList.toggle('on', m === 'pct');
+  $('#mPrice').classList.toggle('on', m === 'price');
+  $('#single').style.display = m === 'price' ? '' : 'none';
+  render();
+}
+
+function renderChart(rows){
+  const css = getComputedStyle(document.documentElement);
+  const grid = css.getPropertyValue('--border').trim(), txt = css.getPropertyValue('--muted').trim();
+  const labels = rows.map(r => label(r.t));
+  const ds = (name, data, color) => ({label:name, data, borderColor:color, backgroundColor:color, borderWidth:2, pointRadius:rows.length > 60 ? 0 : 2, tension:.25, spanGaps:false});
+  let datasets = [];
+  if(state.mode === 'pct'){
+    $('#chartTitle').textContent = 'تغییر درصدی نسبت به ابتدای بازه';
+    for(const a of ASSETS) if(state.sel.has(a)){
+      const base = rows.find(r => r[a] != null);
+      const b = base ? base[a] : null;
+      datasets.push(ds(a, rows.map(r => (b && r[a] != null) ? (r[a]/b - 1)*100 : null), colorOf(a)));
+    }
+  } else {
+    const a = state.single;
+    $('#chartTitle').textContent = 'قیمت ' + a + ' (دلار)';
+    datasets.push(ds(a, rows.map(r => r[a]), colorOf(a)));
+  }
+  if(chart) chart.destroy();
+  chart = new Chart($('#chart'), {type:'line', data:{labels, datasets}, options:{
+    responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
+    plugins:{legend:{labels:{color:txt}}, tooltip:{callbacks:{label:c => {
+      const v = c.parsed.y;
+      if(v == null) return c.dataset.label + ': —';
+      return state.mode === 'pct' ? `${c.dataset.label}: ${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : `${c.dataset.label}: ${fmtPrice(v)}`;
+    }}}},
+    scales:{
+      x:{ticks:{color:txt, maxTicksLimit:7, maxRotation:0}, grid:{color:grid}},
+      y:{ticks:{color:txt, callback:v => state.mode === 'pct' ? v + '%' : fmtPrice(v)}, grid:{color:grid}}
+    }}});
+}
+
+function renderCards(rows){
+  $('#cards').innerHTML = ASSETS.filter(a => state.sel.has(a)).map(a => {
+    const vals = rows.map(r => r[a]).filter(v => v != null);
+    if(!vals.length) return `<div class="card"><div class="name"><span class="dot" style="background:${colorOf(a)}"></span>${a}</div><div class="price">—</div></div>`;
+    const first = vals[0], last = vals[vals.length-1], ch = (last/first - 1)*100;
+    const cls = ch >= 0 ? 'up' : 'down';
+    return `<div class="card"><div class="name"><span class="dot" style="background:${colorOf(a)}"></span>${a}</div>
+      <div class="price">${fmtPrice(last)}</div>
+      <div class="chg ${cls}">${ch >= 0 ? '▲ +' : '▼ '}${ch.toFixed(2)}%</div>
+      <div class="hl">High ${fmtPrice(Math.max(...vals))} · Low ${fmtPrice(Math.min(...vals))}</div></div>`;
+  }).join('');
+}
+
+function corr(rows, a, b){
+  const xs = [], ys = [];
+  for(let i = 1; i < rows.length; i++){
+    const a0 = rows[i-1][a], a1 = rows[i][a], b0 = rows[i-1][b], b1 = rows[i][b];
+    if(a0 != null && a1 != null && b0 != null && b1 != null){ xs.push(a1/a0 - 1); ys.push(b1/b0 - 1); }
+  }
+  if(xs.length < 5) return null;
+  const mx = avg(xs), my = avg(ys);
+  let sxy = 0, sxx = 0, syy = 0;
+  for(let i = 0; i < xs.length; i++){ const dx = xs[i]-mx, dy = ys[i]-my; sxy += dx*dy; sxx += dx*dx; syy += dy*dy; }
+  return (sxx && syy) ? sxy / Math.sqrt(sxx*syy) : null;
+}
+function renderCorr(rows){
+  const as = ASSETS.filter(a => state.sel.has(a));
+  if(as.length < 2){ $('#corr').innerHTML = '<div class="sub">حداقل دو دارایی انتخاب کنید.</div>'; return; }
+  let h = '<table class="corr"><tr><th></th>' + as.map(a => `<th>${a}</th>`).join('') + '</tr>';
+  for(const a of as){
+    h += `<tr><th>${a}</th>`;
+    for(const b of as){
+      const c = a === b ? 1 : corr(rows, a, b);
+      if(c == null){ h += '<td>—</td>'; continue; }
+      const bg = c >= 0 ? `rgba(22,163,74,${Math.abs(c)*.55})` : `rgba(220,38,38,${Math.abs(c)*.55})`;
+      h += `<td class="num" style="background:${bg}">${c.toFixed(2)}</td>`;
+    }
+    h += '</tr>';
+  }
+  $('#corr').innerHTML = h + '</table>';
+}
+
+function renderTable(rows){
+  const as = ASSETS.filter(a => state.sel.has(a));
+  let h = '<tr><th>تاریخ</th><th>ساعت</th>' + as.map(a => `<th>${a}</th>`).join('') + '</tr>';
+  for(const r of [...rows].reverse()){
+    const [d, t] = label(r.t).split(' ');
+    h += `<tr><td>${d}</td><td>${t}</td>` + as.map(a => `<td class="num">${fmtPrice(r[a])}</td>`).join('') + '</tr>';
+  }
+  $('#table').innerHTML = h;
+}
+
+function downloadCSV(){
+  const rows = filtered();
+  const lines = [['Date', 'Time', ...ASSETS].join(',')];
+  for(const r of rows){
+    const [d, t] = r.t.split(' ');
+    lines.push([d, t, ...ASSETS.map(a => r[a] == null ? '' : r[a])].join(','));
+  }
+  const blob = new Blob(['\ufeff' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'prices.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function render(){
+  const rows = filtered();
+  if(!rows.length){ $('#msg').textContent = 'هنوز داده‌ای ذخیره نشده. در GitHub تب Actions ← Update prices ← Run workflow را بزنید.'; return; }
+  $('#msg').textContent = '';
+  renderCards(rows); renderChart(rows); renderCorr(rows); renderTable(rows);
+}
+
+async function init(){
+  try{
+    const r = await fetch('data/prices.json?' + Date.now());
+    DATA = await r.json();
+  } catch(e){
+    $('#msg').textContent = 'خواندن data/prices.json ممکن نشد. اگر فایل را مستقیم باز کرده‌اید، باید از طریق یک سرور (مثل GitHub Pages) باز شود.';
+    $('#updated').textContent = '';
+    return;
+  }
+  ASSETS = DATA.meta.assets;
+  ASSETS.forEach(a => state.sel.add(a));
+  state.single = ASSETS[0];
+  $('#updated').textContent = DATA.meta.updated ? 'آخرین به‌روزرسانی: ' + DATA.meta.updated.replace('T', ' ').slice(0, 16) + ' (وقت تهران)' : 'هنوز به‌روزرسانی نشده';
+  buildControls();
+  render();
+}
+init();
+</script>
+</body>
+</html>
